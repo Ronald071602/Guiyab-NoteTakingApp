@@ -117,4 +117,25 @@ class NoteViewModel(application: Application) : AndroidViewModel(application) {
     fun getNotesWithTag(tagId: Int): Flow<List<Note>> {
         return noteDAO.getNotesWithTag(tagId)
     }
+
+    // Create a note and attach selected tags
+    fun addNoteWithTags(
+        title: String,
+        content: String,
+        category: String,
+        selectedTagIds: List<Int>
+    ) = viewModelScope.launch {
+        val now = System.currentTimeMillis()
+        val note = Note(
+            title = title,
+            content = content,
+            category = category,
+            createdAt = now,
+            updatedAt = now
+        )
+        val newId = noteDAO.insertNote(note).toInt()
+        selectedTagIds.forEach { tagId ->
+            noteDAO.insertNoteTagCrossRef(NoteTagCrossRef(newId, tagId))
+        }
+    }
 }

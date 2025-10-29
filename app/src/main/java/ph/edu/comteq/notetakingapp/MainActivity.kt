@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ph.edu.comteq.notetakingapp.ui.theme.NoteTakingAppTheme
@@ -33,6 +34,8 @@ class MainActivity : ComponentActivity() {
                 var searchQuery by remember { mutableStateOf("") }
                 var isSearchActive by remember { mutableStateOf(false) }
                 val notes by viewModel.allNotes.collectAsState(initial = emptyList())
+
+                var showAddDialog by remember { mutableStateOf(false) }
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -130,7 +133,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     floatingActionButton = {
-                        FloatingActionButton(onClick = { /* TODO: Add note screen */ }) {
+                        FloatingActionButton(onClick = { showAddDialog = true }) {
                             Icon(Icons.Filled.Add, contentDescription = "Add note")
                         }
                     }
@@ -138,6 +141,14 @@ class MainActivity : ComponentActivity() {
                     NoteListScreen(
                         viewModel = viewModel,
                         modifier = Modifier.padding(innerPadding)
+                    )
+                }
+
+                if (showAddDialog) {
+                    AddNoteDialog(
+                        viewModel = viewModel,
+                        onDismiss = { showAddDialog = false },
+                        onSaved = { showAddDialog = false }
                     )
                 }
             }
@@ -166,34 +177,152 @@ fun NoteCard(
         modifier = modifier
             .padding(8.dp)
             .fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        shape = MaterialTheme.shapes.medium
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = DateUtils.formatDate(note.createdAt),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-            )
-            Text(
-                text = note.category,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = DateUtils.formatDate(note.createdAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+                if (note.category.isNotBlank()) {
+                    AssistChip(onClick = { }, label = { Text(note.category) })
+                }
+            }
             Text(
                 text = note.title,
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
+            if (note.content.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = note.content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             // tags
             if(tags.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
                 FlowRow {
-                    tags.forEach {
-                        Text (
-                            text = it.name,
+                    tags.forEach { tag ->
+                        AssistChip(
+                            onClick = { },
+                            label = { Text(tag.name) },
+                            modifier = Modifier.padding(end = 8.dp, bottom = 8.dp)
                         )
                     }
                 }
             }
         }
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AddNoteDialog(
+    viewModel: NoteViewModel,
+    onDismiss: () -> Unit,
+    onSaved: () -> Unit
+) {
+    val allTags by viewModel.allTags.collectAsState(initial = emptyList())
+    val categories by viewModel.allCategories.collectAsState(initial = emptyList())
+
+    var title by remember { mutableStateOf("") }
+    var content by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("") }
+    var selectedTagIds by remember { mutableStateOf(setOf<Int>()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                enabled = title.isNotBlank() && content.isNotBlank(),
+                onClick = {
+                    viewModel.addNoteWithTags(
+                        title = title.trim(),
+                        content = content.trim(),
+                        category = category.trim(),
+                        selectedTagIds = selectedTagIds.toList()
+                    )
+                    onSaved()
+                }
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        title = { Text(text = "Add Note") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text("Content") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 80.dp)
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Category") },
+                    placeholder = { Text("e.g., Personal, Work") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (categories.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    FlowRow {
+                        categories.forEach { cat ->
+                            AssistChip(
+                                onClick = { category = cat },
+                                label = { Text(cat) },
+                                modifier = Modifier.padding(end = 8.dp, bottom = 8.dp)
+                            )
+                        }
+                    }
+                }
+                if (allTags.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(text = "Tags", style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow {
+                        allTags.forEach { tag ->
+                            val selected = tag.id in selectedTagIds
+                            FilterChip(
+                                selected = selected,
+                                onClick = {
+                                    selectedTagIds = if (selected) {
+                                        selectedTagIds - tag.id
+                                    } else {
+                                        selectedTagIds + tag.id
+                                    }
+                                },
+                                label = { Text(tag.name) },
+                                modifier = Modifier.padding(end = 8.dp, bottom = 8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    )
 }
