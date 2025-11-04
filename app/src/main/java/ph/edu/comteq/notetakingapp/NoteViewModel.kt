@@ -138,4 +138,40 @@ class NoteViewModel(application: Application) : AndroidViewModel(application) {
             noteDAO.insertNoteTagCrossRef(NoteTagCrossRef(newId, tagId))
         }
     }
+
+    // Update a note and its tags
+    fun updateNoteWithTags(
+        noteId: Int,
+        title: String,
+        content: String,
+        category: String,
+        selectedTagIds: List<Int>
+    ) = viewModelScope.launch {
+        // Get existing note to preserve createdAt
+        val existingNote = noteDAO.getNoteById(noteId)
+        if (existingNote != null) {
+            val updatedNote = existingNote.copy(
+                title = title,
+                content = content,
+                category = category,
+                updatedAt = System.currentTimeMillis()
+            )
+            noteDAO.updateNote(updatedNote)
+
+            // Get current tags for this note
+            val noteWithTags = noteDAO.getNoteWithTags(noteId)
+            val currentTagIds = noteWithTags?.tags?.map { it.id }?.toSet() ?: emptySet()
+            val newTagIds = selectedTagIds.toSet()
+
+            // Remove tags that are no longer selected
+            currentTagIds.filter { it !in newTagIds }.forEach { tagId ->
+                noteDAO.deleteNoteTagCrossRef(NoteTagCrossRef(noteId, tagId))
+            }
+
+            // Add new tags that weren't previously selected
+            newTagIds.filter { it !in currentTagIds }.forEach { tagId ->
+                noteDAO.insertNoteTagCrossRef(NoteTagCrossRef(noteId, tagId))
+            }
+        }
+    }
 }

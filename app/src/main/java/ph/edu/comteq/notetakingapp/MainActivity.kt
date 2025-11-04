@@ -8,10 +8,12 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import ph.edu.comteq.notetakingapp.ui.theme.NoteTakingAppTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,6 +39,9 @@ class MainActivity : ComponentActivity() {
                 val notes by viewModel.allNotes.collectAsState(initial = emptyList())
 
                 var showAddDialog by remember { mutableStateOf(false) }
+                var editingNoteId by remember { mutableStateOf<Int?>(null) }
+                var noteToDelete by remember { mutableStateOf<Note?>(null) }
+                val scope = rememberCoroutineScope()
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
@@ -116,7 +122,19 @@ class MainActivity : ComponentActivity() {
                                         }
                                     } else {
                                         items(notes) { note ->
-                                            NoteCard(note = note)
+                                            NoteCard(
+                                                note = note,
+                                                onEditClick = {
+                                                    editingNoteId = note.id
+                                                    isSearchActive = false
+                                                    searchQuery = ""
+                                                    viewModel.clearSearch()
+                                                    showAddDialog = true
+                                                },
+                                                onDeleteClick = {
+                                                    noteToDelete = note
+                                                }
+                                            )
                                         }
                                     }
                                 }
@@ -140,15 +158,55 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     NoteListScreen(
                         viewModel = viewModel,
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(innerPadding),
+                        onEditClick = { note ->
+                            editingNoteId = note.id
+                            showAddDialog = true
+                        },
+                        onDeleteClick = { note ->
+                            noteToDelete = note
+                        }
                     )
                 }
 
                 if (showAddDialog) {
                     AddNoteDialog(
                         viewModel = viewModel,
-                        onDismiss = { showAddDialog = false },
-                        onSaved = { showAddDialog = false }
+                        noteId = editingNoteId,
+                        onDismiss = {
+                            showAddDialog = false
+                            editingNoteId = null
+                        },
+                        onSaved = {
+                            showAddDialog = false
+                            editingNoteId = null
+                        }
+                    )
+                }
+
+                // Delete confirmation dialog
+                noteToDelete?.let { note ->
+                    AlertDialog(
+                        onDismissRequest = { noteToDelete = null },
+                        title = { Text("Delete Note") },
+                        text = { Text("Are you sure you want to delete \"${note.title}\"?") },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        viewModel.delete(note)
+                                    }
+                                    noteToDelete = null
+                                }
+                            ) {
+                                Text("Delete")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { noteToDelete = null }) {
+                                Text("Cancel")
+                            }
+                        }
                     )
                 }
             }
@@ -157,12 +215,22 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun NoteListScreen(viewModel: NoteViewModel, modifier: Modifier = Modifier) {
+fun NoteListScreen(
+    viewModel: NoteViewModel,
+    modifier: Modifier = Modifier,
+    onEditClick: (Note) -> Unit = {},
+    onDeleteClick: (Note) -> Unit = {}
+) {
     val notesWithTags by viewModel.allNotesWithTags.collectAsState(initial = emptyList())
 
     LazyColumn(modifier = modifier) {
         items(notesWithTags) { note ->
-            NoteCard(note = note.note, tags = note.tags)
+            NoteCard(
+                note = note.note,
+                tags = note.tags,
+                onEditClick = { onEditClick(note.note) },
+                onDeleteClick = { onDeleteClick(note.note) }
+            )
         }
     }
 }
@@ -172,11 +240,15 @@ fun NoteListScreen(viewModel: NoteViewModel, modifier: Modifier = Modifier) {
 fun NoteCard(
     note: Note,
     tags: List<Tag> = emptyList(),
-    modifier: Modifier = Modifier) {
+    modifier: Modifier = Modifier,
+    onEditClick: () -> Unit = {},
+    onDeleteClick: () -> Unit = {}
+) {
     Card(
         modifier = modifier
             .padding(8.dp)
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .clickable(onClick = onEditClick),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         shape = MaterialTheme.shapes.medium
     ) {
@@ -190,8 +262,21 @@ fun NoteCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 )
-                if (note.category.isNotBlank()) {
-                    AssistChip(onClick = { }, label = { Text(note.category) })
+                Row {
+                    if (note.category.isNotBlank()) {
+                        AssistChip(onClick = { }, label = { Text(note.category) })
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    IconButton(
+                        onClick = onDeleteClick,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete note",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             }
             Text(
@@ -230,16 +315,39 @@ fun NoteCard(
 @Composable
 fun AddNoteDialog(
     viewModel: NoteViewModel,
+    noteId: Int? = null,
     onDismiss: () -> Unit,
     onSaved: () -> Unit
 ) {
     val allTags by viewModel.allTags.collectAsState(initial = emptyList())
     val categories by viewModel.allCategories.collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
 
     var title by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("") }
     var selectedTagIds by remember { mutableStateOf(setOf<Int>()) }
+
+    val isEditMode = noteId != null
+
+    // Load note data when editing
+    LaunchedEffect(noteId) {
+        if (noteId != null) {
+            val noteWithTags = viewModel.getNoteWithTags(noteId)
+            if (noteWithTags != null) {
+                title = noteWithTags.note.title
+                content = noteWithTags.note.content
+                category = noteWithTags.note.category
+                selectedTagIds = noteWithTags.tags.map { it.id }.toSet()
+            }
+        } else {
+            // Reset when switching to add mode
+            title = ""
+            content = ""
+            category = ""
+            selectedTagIds = emptySet()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -247,12 +355,24 @@ fun AddNoteDialog(
             TextButton(
                 enabled = title.isNotBlank() && content.isNotBlank(),
                 onClick = {
-                    viewModel.addNoteWithTags(
-                        title = title.trim(),
-                        content = content.trim(),
-                        category = category.trim(),
-                        selectedTagIds = selectedTagIds.toList()
-                    )
+                    if (isEditMode && noteId != null) {
+                        scope.launch {
+                            viewModel.updateNoteWithTags(
+                                noteId = noteId,
+                                title = title.trim(),
+                                content = content.trim(),
+                                category = category.trim(),
+                                selectedTagIds = selectedTagIds.toList()
+                            )
+                        }
+                    } else {
+                        viewModel.addNoteWithTags(
+                            title = title.trim(),
+                            content = content.trim(),
+                            category = category.trim(),
+                            selectedTagIds = selectedTagIds.toList()
+                        )
+                    }
                     onSaved()
                 }
             ) {
@@ -262,7 +382,7 @@ fun AddNoteDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
-        title = { Text(text = "Add Note") },
+        title = { Text(text = if (isEditMode) "Edit Note" else "Add Note") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
